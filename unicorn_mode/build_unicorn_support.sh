@@ -147,6 +147,7 @@ echo "[*] Applying patches..."
 sudo -u ${USERNAME} patch -p0 <patches/config.diff || exit 1
 sudo -u ${USERNAME} patch -p0 <patches/cpu-exec.diff || exit 1
 sudo -u ${USERNAME} patch -p0 <patches/translate-all.diff || exit 1
+sudo -u ${USERNAME} patch -p0 <patches/expose-mem-transactions.diff || exit 1
 
 echo "[+] Patching done."
 

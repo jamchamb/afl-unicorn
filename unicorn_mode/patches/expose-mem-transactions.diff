@@ -1,0 +1,95 @@
+--- unicorn-1.0.1-original/bindings/python/unicorn/unicorn.py	2017-04-20 02:14:24.000000000 -0400
++++ unicorn-1.0.1/bindings/python/unicorn/unicorn.py	2018-11-02 20:07:38.377959660 -0400
+@@ -115,6 +115,8 @@
+ 
+ _setup_prototype(_uc, "uc_version", ctypes.c_uint, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
+ _setup_prototype(_uc, "uc_arch_supported", ctypes.c_bool, ctypes.c_int)
++_setup_prototype(_uc, "uc_memory_transaction_begin", ucerr, uc_engine)
++_setup_prototype(_uc, "uc_memory_transaction_commit", ucerr, uc_engine)
+ _setup_prototype(_uc, "uc_open", ucerr, ctypes.c_uint, ctypes.c_uint, ctypes.POINTER(uc_engine))
+ _setup_prototype(_uc, "uc_close", ucerr, uc_engine)
+ _setup_prototype(_uc, "uc_strerror", ctypes.c_char_p, ucerr)
+@@ -293,6 +295,16 @@
+         if status != uc.UC_ERR_OK:
+             raise UcError(status)
+ 
++    def memory_transaction_begin(self):
++        status = _uc.uc_memory_transaction_begin(self._uch)
++        if status != uc.UC_ERR_OK:
++            raise UcError(status)
++
++    def memory_transaction_commit(self):
++        status = _uc.uc_memory_transaction_commit(self._uch)
++        if status != uc.UC_ERR_OK:
++            raise UcError(status)
++
+     # return the value of a register
+     def reg_read(self, reg_id, opt=None):
+         if self._arch == uc.UC_ARCH_X86:
+--- unicorn-1.0.1-original/include/uc_priv.h	2017-04-20 02:14:24.000000000 -0400
++++ unicorn-1.0.1/include/uc_priv.h	2018-11-02 20:04:24.675634565 -0400
+@@ -161,6 +161,8 @@
+     uc_args_uc_long_t tcg_exec_init;
+     uc_args_uc_ram_size_t memory_map;
+     uc_args_uc_ram_size_ptr_t memory_map_ptr;
++    uc_args_uc_t memory_transaction_begin;
++    uc_args_uc_t memory_transaction_commit;
+     uc_mem_unmap_t memory_unmap;
+     uc_readonly_mem_t readonly_mem;
+     uc_mem_redirect_t mem_redirect;
+--- unicorn-1.0.1-original/include/unicorn/unicorn.h	2017-04-20 02:14:24.000000000 -0400
++++ unicorn-1.0.1/include/unicorn/unicorn.h	2018-11-02 20:05:40.534978653 -0400
+@@ -333,6 +333,17 @@
+ 
+ 
+ /*
++  Expose memory region transactions for optimizing setup.
++  Prevents huge performance hits from mapping lots of segments to
++  set up a system.
++*/
++UNICORN_EXPORT
++uc_err uc_memory_transaction_begin(uc_engine *uc);
++
++UNICORN_EXPORT
++uc_err uc_memory_transaction_commit(uc_engine *uc);
++
++/*
+  Create new instance of unicorn engine.
+ 
+  @arch: architecture type (UC_ARCH_*)
+--- unicorn-1.0.1-original/qemu/unicorn_common.h	2017-04-20 02:14:24.000000000 -0400
++++ unicorn-1.0.1/qemu/unicorn_common.h	2018-11-02 19:50:09.747030164 -0400
+@@ -78,6 +78,8 @@
+     uc->memory_map_ptr = memory_map_ptr;
+     uc->memory_unmap = memory_unmap;
+     uc->readonly_mem = memory_region_set_readonly;
++    uc->memory_transaction_begin = memory_region_transaction_begin;
++    uc->memory_transaction_commit = memory_region_transaction_commit;
+ 
+     uc->target_page_size = TARGET_PAGE_SIZE;
+     uc->target_page_align = TARGET_PAGE_SIZE - 1;
+--- unicorn-1.0.1-original/uc.c	2017-04-20 02:14:24.000000000 -0400
++++ unicorn-1.0.1/uc.c	2018-11-02 20:11:36.619871564 -0400
+@@ -137,6 +137,22 @@
+ 
+ 
+ UNICORN_EXPORT
++uc_err uc_memory_transaction_begin(uc_engine *uc)
++{
++    uc->memory_transaction_begin(uc);
++    return UC_ERR_OK;
++}
++
++
++UNICORN_EXPORT
++uc_err uc_memory_transaction_commit(uc_engine *uc)
++{
++    uc->memory_transaction_commit(uc);
++    return UC_ERR_OK;
++}
++
++
++UNICORN_EXPORT
+ uc_err uc_open(uc_arch arch, uc_mode mode, uc_engine **result)
+ {
+     struct uc_struct *uc;

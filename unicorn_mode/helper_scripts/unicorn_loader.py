@@ -209,11 +209,6 @@ class AflUnicornEngine(Uc):
                             print("ERROR writing hex string register: {}, value: {} -- {}".format(register, value, repr(e)))
                         
         # Setup the memory map and load memory content
-        # decompress all the binaries
-        print("Decompressing binaries...")
-        context['segments'] = decompress_data(context['segments'], context_directory)
-        print("done.")
-
         print("Mapping segments...")
         self.memory_transaction_begin()
         self.__map_segments(context['segments'], context_directory, debug_print)
@@ -358,8 +353,8 @@ class AflUnicornEngine(Uc):
         for segment in segment_list:
             # Get the segment information from the index
             name = segment['name']
-            seg_start = segment['start'] + self.base_address
-            seg_end = segment['end'] + self.base_address
+            seg_start = segment['start']
+            seg_end = segment['end']
 
             if debug_print:
                 print("Loading segment {0} (0x{1:016x} - 0x{2:016x})".format(name, seg_start, seg_end))
@@ -374,7 +369,7 @@ class AflUnicornEngine(Uc):
                 content_file = open(content_file_path, 'rb')
                 compressed_content = content_file.read()
                 content_file.close()
-                self.mem_write(seg_start, zlib.decompress(compressed_content)) 
+                self.mem_write(seg_start, zlib.decompress(compressed_content))
 
             else:
                 if debug_print:
