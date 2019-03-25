@@ -209,8 +209,23 @@ class AflUnicornEngine(Uc):
                             print("ERROR writing hex string register: {}, value: {} -- {}".format(register, value, repr(e)))
                         
         # Setup the memory map and load memory content
+        # decompress all the binaries
+        print("Decompressing binaries...")
+        context['segments'] = decompress_data(context['segments'], context_directory)
+        print("done.")
+
+        print("Mapping segments...")
+        self.memory_transaction_begin()
         self.__map_segments(context['segments'], context_directory, debug_print)
-        
+        self.memory_transaction_commit()
+        print("done.")
+
+        print("Loading segment content...")
+        self.memory_transaction_begin()
+        self.__load_segments(context['segments'], context_directory, debug_print)
+        self.memory_transaction_commit()
+        print("done.")
+
         if enable_trace:
             self.hook_add(UC_HOOK_BLOCK, self.__trace_block)
             self.hook_add(UC_HOOK_CODE, self.__trace_instruction)
@@ -338,6 +353,16 @@ class AflUnicornEngine(Uc):
             else:
                 if debug_print:
                     print("Segment {} already mapped. Moving on.".format(name))
+
+    def __load_segments(self, segment_list, context_directory, debug_print=False):
+        for segment in segment_list:
+            # Get the segment information from the index
+            name = segment['name']
+            seg_start = segment['start'] + self.base_address
+            seg_end = segment['end'] + self.base_address
+
+            if debug_print:
+                print("Loading segment {0} (0x{1:016x} - 0x{2:016x})".format(name, seg_start, seg_end))
 
             # Load the content (if available)
             if 'content_file' in segment and len(segment['content_file']) > 0:
