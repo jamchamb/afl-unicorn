@@ -1,0 +1,219 @@
+--- unicorn-1.0.1-default-patches/qemu/include/qom/object.h	2018-11-01 19:58:19.363847960 -0400
++++ unicorn-1.0.1/qemu/include/qom/object.h	2018-11-01 18:56:05.711416374 -0400
+@@ -19,6 +19,7 @@
+ #include <stdbool.h>
+ #include "qemu/queue.h"
+ #include "qapi/error.h"
++#include "uthash.h"
+ 
+ struct Visitor;
+ 
+@@ -352,7 +353,8 @@
+     ObjectPropertyRelease *release;
+     void *opaque;
+ 
+-    QTAILQ_ENTRY(ObjectProperty) node;
++    //QTAILQ_ENTRY(ObjectProperty) node;
++    UT_hash_handle hh;
+ } ObjectProperty;
+ 
+ /**
+@@ -412,7 +414,8 @@
+     /*< private >*/
+     ObjectClass *class;
+     ObjectFree *free;
+-    QTAILQ_HEAD(, ObjectProperty) properties;
++    //QTAILQ_HEAD(, ObjectProperty) properties;
++    ObjectProperty* properties;
+     uint32_t ref;
+     Object *parent;
+ };
+diff -u -r unicorn-1.0.1-default-patches/qemu/qom/object.c unicorn-1.0.1/qemu/qom/object.c
+--- unicorn-1.0.1-default-patches/qemu/qom/object.c	2018-11-01 19:58:19.375847846 -0400
++++ unicorn-1.0.1/qemu/qom/object.c	2018-11-01 19:16:57.903485198 -0400
+@@ -27,6 +27,8 @@
+ 
+ #include "uc_priv.h"
+ 
++#include "uthash.h"
++
+ #define MAX_INTERFACES 32
+ 
+ typedef struct InterfaceImpl InterfaceImpl;
+@@ -335,7 +337,8 @@
+     memset(obj, 0, type->instance_size);
+     obj->class = type->class;
+     object_ref(obj);
+-    QTAILQ_INIT(&obj->properties);
++    //QTAILQ_INIT(&obj->properties);
++    obj->properties = NULL;
+     object_init_with_type(uc, obj, type);
+     object_post_init_with_type(uc, obj, type);
+ }
+@@ -354,10 +357,15 @@
+ 
+ static void object_property_del_all(struct uc_struct *uc, Object *obj)
+ {
+-    while (!QTAILQ_EMPTY(&obj->properties)) {
+-        ObjectProperty *prop = QTAILQ_FIRST(&obj->properties);
++    ObjectProperty *prop, *tmp_prop;
++
++    //while (!QTAILQ_EMPTY(&obj->properties)) {
++    HASH_ITER(hh, obj->properties, prop, tmp_prop) {
++        //ObjectProperty *prop = QTAILQ_FIRST(&obj->properties);e
++
++        //QTAILQ_REMOVE(&obj->properties, prop, node);
+ 
+-        QTAILQ_REMOVE(&obj->properties, prop, node);
++        HASH_DEL(obj->properties, prop);
+ 
+         if (prop->release) {
+             prop->release(uc, obj, prop->name, prop->opaque);
+@@ -372,9 +380,10 @@
+ 
+ void object_property_del_child(struct uc_struct *uc, Object *obj, Object *child, Error **errp)
+ {
+-    ObjectProperty *prop;
++    ObjectProperty *prop, *tmp_prop;
+ 
+-    QTAILQ_FOREACH(prop, &obj->properties, node) {
++    //QTAILQ_FOREACH(prop, &obj->properties, node) {
++    HASH_ITER(hh, obj->properties, prop, tmp_prop) {
+         if (object_property_is_child(prop) && prop->opaque == child) {
+             object_property_del(uc, obj, prop->name, errp);
+             break;
+@@ -663,7 +672,8 @@
+     ObjectProperty *prop, *next;
+     int ret = 0;
+ 
+-    QTAILQ_FOREACH_SAFE(prop, &obj->properties, node, next) {
++    //QTAILQ_FOREACH_SAFE(prop, &obj->properties, node, next) {
++    HASH_ITER(hh, obj->properties, prop, next) {
+         if (object_property_is_child(prop)) {
+             ret = fn(prop->opaque, opaque);
+             if (ret != 0) {
+@@ -712,6 +722,27 @@
+     }
+ }
+ 
++/* Make looking up next array index a bit faster... */
++/*
++int find_next_property_index(Object *obj, const char *name_no_array, size_t name_len)
++{
++    ObjectProperty *prop;
++    int cur_index = -1;
++    int max_index = -1;
++
++    QTAILQ_FOREACH(prop, &obj->properties, node) {
++        if (strncmp(prop->name, name_no_array, name_len) == 0) {
++            if (prop->name[name_len + 1] == '[') {
++                cur_index = atoi((const char*) (prop->name)[name_len + 2]);
++                if (cur_index > max_index) max_index = cur_index;
++            }
++        }
++    }
++
++    return max_index + 1;
++}
++*/
++
+ ObjectProperty *
+ object_property_add(Object *obj, const char *name, const char *type,
+                     ObjectPropertyAccessor *get,
+@@ -719,7 +750,7 @@
+                     ObjectPropertyRelease *release,
+                     void *opaque, Error **errp)
+ {
+-    ObjectProperty *prop;
++    ObjectProperty *prop, *find_existing;
+     size_t name_len = strlen(name);
+ 
+     if (name_len >= 3 && !memcmp(name + name_len - 3, "[*]", 4)) {
+@@ -728,6 +759,7 @@
+         char *name_no_array = g_strdup(name);
+ 
+         name_no_array[name_len - 3] = '\0';
++        //for (i = find_next_property_index(obj, name_no_array, name_len - 3); ; ++i) {
+         for (i = 0; ; ++i) {
+             char *full_name = g_strdup_printf("%s[%d]", name_no_array, i);
+ 
+@@ -742,6 +774,7 @@
+         return ret;
+     }
+ 
++/*
+     QTAILQ_FOREACH(prop, &obj->properties, node) {
+         if (strcmp(prop->name, name) == 0) {
+             error_setg(errp, "attempt to add duplicate property '%s'"
+@@ -750,6 +783,14 @@
+             return NULL;
+         }
+     }
++*/
++    HASH_FIND_STR(obj->properties, name, find_existing);
++    if (find_existing) {
++        error_setg(errp, "attempt to add duplicate property '%s'"
++                   " to object (type '%s')", name,
++                   object_get_typename(obj));
++        return NULL;
++    }
+ 
+     prop = g_malloc0(sizeof(*prop));
+ 
+@@ -761,7 +802,9 @@
+     prop->release = release;
+     prop->opaque = opaque;
+ 
+-    QTAILQ_INSERT_TAIL(&obj->properties, prop, node);
++    //QTAILQ_INSERT_TAIL(&obj->properties, prop, node);
++    HASH_ADD_KEYPTR(hh, obj->properties, name, name_len, prop);
++
+     return prop;
+ }
+ 
+@@ -770,11 +813,15 @@
+ {
+     ObjectProperty *prop;
+ 
++    /*
+     QTAILQ_FOREACH(prop, &obj->properties, node) {
+         if (strcmp(prop->name, name) == 0) {
+             return prop;
+         }
+     }
++    */
++    HASH_FIND_STR(obj->properties, name, prop);
++    if (prop) return prop;
+ 
+     error_setg(errp, "Property '.%s' not found", name);
+     return NULL;
+@@ -791,7 +838,8 @@
+         prop->release(uc, obj, name, prop->opaque);
+     }
+ 
+-    QTAILQ_REMOVE(&obj->properties, prop, node);
++    //QTAILQ_REMOVE(&obj->properties, prop, node);
++    HASH_DEL(obj->properties, prop);
+ 
+     g_free(prop->name);
+     g_free(prop->type);
+@@ -1202,7 +1250,8 @@
+     g_assert(obj);
+     g_assert(obj->parent != NULL);
+ 
+-    QTAILQ_FOREACH(prop, &obj->parent->properties, node) {
++    //QTAILQ_FOREACH(prop, &obj->parent->properties, node) {
++    for (prop = &obj->parent->properties; prop != NULL; prop = prop->hh.next) {
+         if (!object_property_is_child(prop)) {
+             continue;
+         }
+@@ -1290,7 +1339,8 @@
+ 
+     obj = object_resolve_abs_path(uc, parent, parts, typename, 0);
+ 
+-    QTAILQ_FOREACH(prop, &parent->properties, node) {
++    //QTAILQ_FOREACH(prop, &parent->properties, node) {
++    for (prop = &parent->properties; prop != NULL; prop = prop->hh.next) {
+         Object *found;
+ 
+         if (!object_property_is_child(prop)) {
